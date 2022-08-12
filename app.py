@@ -1,10 +1,14 @@
+import dash
 import os
 
-from flask import Flask
+from flask import Flask, url_for, session
 from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
 
-import dash
-from dash import Input, Output, State, html, dcc
+from dash import Dash, Input, Output, State, html, dcc
+from flask_dance.consumer import OAuth2ConsumerBlueprint
+import requests
+
+from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
 
 # CREDIT: This code is copied from Dash official documentation:
 # https://dash.plotly.com/urls
@@ -16,13 +20,38 @@ from dash import Input, Output, State, html, dcc
 # the exception.
 # Exposing the Flask Server to enable configuring it for logging in
 server = Flask(__name__)
-app = dash.Dash(__name__, server=server,
-                title='Example Dash login',
-                update_title='Loading...',
-                suppress_callback_exceptions=True)
+app = Dash(__name__, 
+        server=server,
+        title='Example Dash login',
+        update_title='Loading...',
+        suppress_callback_exceptions=True,
+)
 
 # Updating the Flask Server configuration with Secret Key to encrypt the user session cookie
 server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'))
+
+
+# code_verifier = generate_token(48)
+# code_challenge = create_s256_code_challenge(code_verifier)
+# # client = OAuth2Session("16dfdba6-d408-494e-b8a3-eb0e8e4f4229", "client_secret", scope="openid email")
+# authorize_url = "https://samly.howto:4443/t/cryptr/?idp_ids%5B%5D=shark_academy_UdVEzZSGHvCsfkMJckqcJn&idp_ids%5B%5D=blockpulse_6Jc3TGatGmsHzexaRP5ZrE"
+idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaRP5ZrE"]
+
+auth_params = {'idp_ids[]': ['shark_academy_UdVEzZSGHvCsfkMJckqcJn', 'blockpulse_6Jc3TGatGmsHzexaRP5ZrE']}
+
+blueprint = CryptrOAuth2ConsumerBlueprint(
+    "cryptr", __name__,
+    client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
+    client_secret="my-secret-here",
+    base_url="https://samly.howto:4443",
+    token_url="https://samly.howto:4443/login/access_token",
+    authorization_url="https://samly.howto:4443/t/cryptr/",
+    # authorization_url_params=dict(code_challenge_method="S256", code_challenge="my-code-challenge", idp_ids=)
+    authorization_url_params=auth_params
+)
+
+server.register_blueprint(blueprint, url_prefix="/login")
+
 
 # Login manager object will be used to login / logout users
 login_manager = LoginManager()
@@ -205,7 +234,8 @@ def display_page(pathname):
             view = page_2_layout
         else:
             view = 'Redirecting to login...'
-            url = '/login'
+            print(session)
+            url = url_for("cryptr.login")
     else:
         view = index_page
     # You could also return a 404 "URL not found" page here
