@@ -49,11 +49,13 @@ blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", __name__,
     client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
     client_secret="my-secret-here",
-    base_url="https://samly.howto:4443",
-    token_url="https://samly.howto:4443/login/access_token",
-    authorization_url="https://samly.howto:4443/t/cryptr/",
+    base_url="http://localhost:4000",
+    scope="email profile openid",
+    token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
+    authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
+    # authorization_url="https://samly.howto:4443/t/cryptr/",
     # authorization_url_params=dict(code_challenge_method="S256", code_challenge="my-code-challenge", idp_ids=)
-    authorization_url_params=auth_params
+    # authorization_url_params=auth_params
 )
 
 server.register_blueprint(blueprint, url_prefix="/login")
@@ -196,7 +198,8 @@ def page_2_radios(value):
 @app.callback(Output('user-status-div', 'children'), Output('login-status', 'data'), [Input('url', 'pathname')])
 def login_status(url):
     ''' callback to display login/logout link in the header '''
-    if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
+    # if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
+    if "cryptr_oauth_token" in session \
             and url != '/logout':  # If the URL is /logout, then the user is about to be logged out anyways
         return dcc.Link('logout', href='/logout'), current_user.get_id()
     else:
@@ -218,15 +221,21 @@ def display_page(pathname):
     # We setup the defaults at the beginning, with redirect to dash.no_update; which simply means, just keep the requested url
     view = None
     url = dash.no_update
+    print("session", session)
+
     if pathname == '/login':
         view = login
     elif pathname == '/success':
-        if current_user.is_authenticated:
+        # if current_user.is_authenticated:
+        if "cryptr_oauth_token" in session:
             view = success
         else:
             view = failed
     elif pathname == '/logout':
-        if current_user.is_authenticated:
+        if session["cryptr_oauth_code_verifier"]:
+            session.pop("cryptr_oauth_code_verifier")
+        if "cryptr_oauth_token" in session:
+            session.pop("cryptr_oauth_token")
             logout_user()
             view = logout
         else:
@@ -236,11 +245,10 @@ def display_page(pathname):
     elif pathname == '/page-1':
         view = page_1_layout
     elif pathname == '/page-2':
-        if current_user.is_authenticated:
+        if "cryptr_oauth_token" in session:
             view = page_2_layout
         else:
             view = 'Redirecting to login...'
-            print(session)
             url = url_for("cryptr.login")
     else:
         view = index_page

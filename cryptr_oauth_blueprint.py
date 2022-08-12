@@ -208,8 +208,9 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
     def build_auth_params(self, **auth_params):
         code_verifier = self.build_code_verifier()
         code_challenge = self.build_code_challenge(code_verifier=code_verifier)
-        
+        print('auth_params', auth_params)
         new_params = dict(code_challenge_method='S256', code_challenge=code_challenge, **auth_params)
+        print('new_params', new_params)
         return (code_verifier, code_challenge, new_params)
 
     def build_code_verifier(self):
@@ -233,6 +234,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         url, state = self.session.authorization_url(
             self.authorization_url, state=self.state, **new_params
         )
+        url= url.replace("/transaction-pkce-state/", "/" + state + "/")
         url= url.replace("state=", "client_state=")
         state_key = f"{self.name}_oauth_state"
         flask.session[state_key] = state
@@ -244,26 +246,26 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         log.debug("\n---\n")
         return redirect(url)
     
-    def enterprise_login(self):
-        log.debug("\n---\nlogin\n---")
-        log.debug("client_id = %s", self.client_id)
-        self.session.redirect_uri = url_for(".authorized", _external=True)
-        code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
-        print('code_verifier', code_verifier)
-        print('code_challenge', code_challenge)
-        url, state = self.session.authorization_url(
-            self.authorization_url, state=self.state, **new_params
-        )
-        url= url.replace("state=", "client_state=")
-        state_key = f"{self.name}_oauth_state"
-        flask.session[state_key] = state
-        code_verifier_key = f"{self.name}_oauth_code_verifier"
-        flask.session[code_verifier_key] = code_verifier
-        log.debug("state = %s", state)
-        log.debug("redirect URL = %s", url)
-        oauth_before_login.send(self, url=url)
-        log.debug("\n---\n")
-        return redirect(url)
+    # def enterprise_login(self):
+    #     log.debug("\n---\nlogin\n---")
+    #     log.debug("client_id = %s", self.client_id)
+    #     self.session.redirect_uri = url_for(".authorized", _external=True)
+    #     code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
+    #     print('code_verifier', code_verifier)
+    #     print('code_challenge', code_challenge)
+    #     url, state = self.session.authorization_url(
+    #         self.authorization_url, state=self.state, **new_params
+    #     )
+    #     url= url.replace("state=", "client_state=")
+    #     state_key = f"{self.name}_oauth_state"
+    #     flask.session[state_key] = state
+    #     code_verifier_key = f"{self.name}_oauth_code_verifier"
+    #     flask.session[code_verifier_key] = code_verifier
+    #     log.debug("state = %s", state)
+    #     log.debug("redirect URL = %s", url)
+    #     oauth_before_login.send(self, url=url)
+    #     log.debug("\n---\n")
+    #     return redirect(url)
 
     def authorized(self):
         """
@@ -296,11 +298,13 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             return redirect(next_url)
 
         state_key = f"{self.name}_oauth_state"
+        code_verifier_key = f"{self.name}_oauth_code_verifier"
         if state_key not in flask.session:
             # can't validate state, so redirect back to login view
             log.info("state not found, redirecting user to login")
             return redirect(url_for(".login"))
 
+        code_verifier = flask.session[code_verifier_key]
         state = flask.session[state_key]
         log.debug("state = %s", state)
         self.session._state = state
@@ -310,12 +314,15 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         log.debug("client_id = %s", self.client_id)
         log.debug("client_secret = %s", self.client_secret)
+        dyn_token_url = self.token_url.replace("transaction-pkce-state", state)
+        dyn_token_url = dyn_token_url.replace("auth-id", request.args["authorization_id"])
+        tok_url_params = dict(code_verifier=code_verifier, nonce="some-nonce", **self.token_url_params)
         try:
             token = self.session.fetch_token(
-                self.token_url,
+                dyn_token_url,
                 authorization_response=request.url,
                 client_secret=self.client_secret,
-                **self.token_url_params,
+                **tok_url_params,
             )
         except MissingCodeError as e:
             e.args = (
