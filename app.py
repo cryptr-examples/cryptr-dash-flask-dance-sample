@@ -1,5 +1,6 @@
 import dash
 import os
+import logging
 
 from flask import Flask, url_for, session
 from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
@@ -7,8 +8,13 @@ from flask_login import login_user, LoginManager, UserMixin, logout_user, curren
 from dash import Dash, Input, Output, State, html, dcc
 from flask_dance.consumer import OAuth2ConsumerBlueprint
 import requests
+from flask_ngrok import run_with_ngrok
 
 from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
+
+logging.basicConfig()
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 # CREDIT: This code is copied from Dash official documentation:
 # https://dash.plotly.com/urls
@@ -37,7 +43,7 @@ server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'))
 # authorize_url = "https://samly.howto:4443/t/cryptr/?idp_ids%5B%5D=shark_academy_UdVEzZSGHvCsfkMJckqcJn&idp_ids%5B%5D=blockpulse_6Jc3TGatGmsHzexaRP5ZrE"
 idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaRP5ZrE"]
 
-auth_params = {'idp_ids[]': ['shark_academy_UdVEzZSGHvCsfkMJckqcJn', 'blockpulse_6Jc3TGatGmsHzexaRP5ZrE']}
+auth_params = {'idp_ids[]': idp_ids[1]}
 
 blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", __name__,
