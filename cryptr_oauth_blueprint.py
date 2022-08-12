@@ -1,5 +1,9 @@
+import base64
+import hashlib
 import json
 import logging
+import os
+import re
 
 import flask
 from flask import current_app, redirect, request, url_for
@@ -200,20 +204,65 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         except KeyError:
             pass
 
-    def build_code_challenge():
-        'my-code-challenge'
+
+    def build_auth_params(self, **auth_params):
+        code_verifier = self.build_code_verifier()
+        code_challenge = self.build_code_challenge(code_verifier=code_verifier)
+        
+        new_params = dict(code_challenge_method='S256', code_challenge=code_challenge, **auth_params)
+        return (code_verifier, code_challenge, new_params)
+
+    def build_code_verifier(self):
+        code_verifier = base64.urlsafe_b64encode(os.urandom(40)).decode('utf-8')
+        code_verifier = re.sub('[^a-zA-Z0-9]+', '', code_verifier)
+        return code_verifier
+
+    def build_code_challenge(self, code_verifier):
+        code_challenge = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        code_challenge = base64.urlsafe_b64encode(code_challenge).decode('utf-8')
+        code_challenge = code_challenge.replace('=', '')
+        return code_challenge
 
     def login(self):
+        log.debug("\n---\nlogin\n---")
         log.debug("client_id = %s", self.client_id)
         self.session.redirect_uri = url_for(".authorized", _external=True)
+        code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
+        print('code_verifier', code_verifier)
+        print('code_challenge', code_challenge)
         url, state = self.session.authorization_url(
-            self.authorization_url, state=self.state, code_challenge_method='S256', **self.authorization_url_params
+            self.authorization_url, state=self.state, **new_params
         )
+        url= url.replace("state=", "client_state=")
         state_key = f"{self.name}_oauth_state"
         flask.session[state_key] = state
+        code_verifier_key = f"{self.name}_oauth_code_verifier"
+        flask.session[code_verifier_key] = code_verifier
         log.debug("state = %s", state)
         log.debug("redirect URL = %s", url)
         oauth_before_login.send(self, url=url)
+        log.debug("\n---\n")
+        return redirect(url)
+    
+    def enterprise_login(self):
+        log.debug("\n---\nlogin\n---")
+        log.debug("client_id = %s", self.client_id)
+        self.session.redirect_uri = url_for(".authorized", _external=True)
+        code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
+        print('code_verifier', code_verifier)
+        print('code_challenge', code_challenge)
+        url, state = self.session.authorization_url(
+            self.authorization_url, state=self.state, **new_params
+        )
+        url= url.replace("state=", "client_state=")
+        state_key = f"{self.name}_oauth_state"
+        flask.session[state_key] = state
+        code_verifier_key = f"{self.name}_oauth_code_verifier"
+        flask.session[code_verifier_key] = code_verifier
+        log.debug("state = %s", state)
+        log.debug("redirect URL = %s", url)
+        oauth_before_login.send(self, url=url)
+        log.debug("\n---\n")
         return redirect(url)
 
     def authorized(self):
