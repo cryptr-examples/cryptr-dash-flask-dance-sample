@@ -5,6 +5,7 @@ import logging
 import os
 from pickle import FALSE
 import re
+import requests
 
 import flask
 from flask import current_app, redirect, request, url_for
@@ -139,6 +140,13 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             authorized_url=authorized_url,
             storage=storage,
             rule_kwargs=rule_kwargs,
+        )
+
+        self.add_url_rule(
+            rule="/{bp.name}/logout".format(bp=self),
+            endpoint="logout",
+            view_func=self.logout,
+            **{}
         )
 
         self.tenant_domain = tenant_domain
@@ -278,6 +286,21 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         log.debug("redirect URL = %s", url)
         log.debug("\n---\n")
         return redirect(url)
+
+    def logout(self):
+        if 'cryptr_oauth_token' in flask.session:
+            refresh_token = flask.session['cryptr_oauth_token']['refresh_token']
+            tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
+            logout_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/revoke'
+            revoke_token_resp = requests.post(logout_url, json={'token': refresh_token, 'token_type_hint': 'refresh_token'}, verify=False)
+            revoke_json_resp = revoke_token_resp.json()
+            if 'revoked_at' in revoke_json_resp:
+                flask.session.clear()
+            if 'slo_code' in revoke_json_resp:
+                slo_code = revoke_json_resp['slo_code']
+                slo_after_revoke_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/slo-after-revoke-token?slo_code={slo_code}&target_url={request.base_url}'
+                return redirect(slo_after_revoke_url)
+        return redirect('/')
 
 
     def authorized(self):

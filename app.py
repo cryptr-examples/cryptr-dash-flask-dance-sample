@@ -255,29 +255,26 @@ def display_page(pathname):
         else:
             view = failed
     elif pathname == '/logout':
-        if 'cryptr_oauth_code_verifier' in session:
-            session.pop("cryptr_oauth_code_verifier")
-        if 'sso_gateway' in session:
-            session.pop("sso_gateway")
         if "cryptr_oauth_token" in session:
-            session.pop("cryptr_oauth_token")
-        if "cryptr_oauth_code_challenge" in session:
-            session.pop("cryptr_oauth_code_challenge")
             logout_user()
             view = logout
+            url = url_for('cryptr.logout')
         else:
             view = login
             url = '/login'
 
     elif pathname == '/page-1':
-        view = page_1_layout
+        if "cryptr_oauth_token" in session:
+            view = page_1_layout
+        else:
+            view = 'Redirecting to magic link login...'
+            url = cryptr_url(locale='fr')
     elif pathname == '/page-2':
         if "cryptr_oauth_token" in session:
             view = page_2_layout
         else:
-            view = 'Redirecting to login...'
+            view = 'Redirecting to sso login...'
             url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
-            # url = cryptr_url(locale='fr')
     else:
         view = index_page
     # You could also return a 404 "URL not found" page here
