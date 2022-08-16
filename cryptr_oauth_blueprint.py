@@ -165,7 +165,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         self.authorization_url = authorization_url
         self.authorization_url_params = authorization_url_params or {}
         # self.token_url = token_url
-        self.token_url = "http://localhost:4000/api/v1/tenants/cryptr/client_id/transaction-pkce-state/oauth/sign_type/client/auth-id/token"
+        self.token_url = f"{self.base_url}/api/v1/tenants/tenant-domain/client_id/transaction-pkce-state/oauth/sign_type/client/auth-id/token"
         self.token_url_params = token_url_params or {}
         self.redirect_url = redirect_url
         self.redirect_to = redirect_to
@@ -244,8 +244,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         self.session.redirect_uri = url_for(".authorized", _external=True)
         code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
         # print('code_verifier', code_verifier)
-        print(f'\nmagic_link_url: {self.magic_link_auth_url}\n')
-        print(f'\nsso_gateway_auth_url: {self.sso_gateway_auth_url}\n')
+        print('code_verifier', code_verifier)
         print('code_challenge', code_challenge)
 
         user_locale = flask.session["locale"] if 'locale' in flask.session else self.default_locale
@@ -262,6 +261,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         flask.session[state_key] = state
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         flask.session[code_verifier_key] = code_verifier
+        code_challenge_key = f"{self.name}_oauth_code_challenge"
+        flask.session[code_challenge_key] = code_challenge
         # log.debug("state = %s", state)
         oauth_before_login.send(self, url=url)
         if 'sso_gateway' in flask.session and flask.session['sso_gateway']:
@@ -309,6 +310,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             )
             return redirect(next_url)
 
+        log.debug(flask.session)
         state_key = f"{self.name}_oauth_state"
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         if state_key not in flask.session:
@@ -317,6 +319,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             return redirect(url_for(".login"))
 
         code_verifier = flask.session[code_verifier_key]
+        code_challenge_key = f"{self.name}_oauth_code_challenge"
+        code_challenge = flask.session[code_challenge_key]
         state = flask.session[state_key]
         log.debug("state = %s", state)
         self.session._state = state
@@ -324,12 +328,12 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         self.session.redirect_uri = url_for(".authorized", _external=True)
 
-        for key in request.args:
-            log.debug(f"{key} -> {request.args.get(key)}")
+        # for key in request.args:
+        #     log.debug(f"{key} -> {request.args.get(key)}")
 
-        log.debug("client_id = %s", self.client_id)
-        log.debug("client_secret = %s", self.client_secret)
+        # dyn_token_url = self.token_url.replace("transaction-pkce-state", code_challenge if 'organization_domain' in request.args else state)
         dyn_token_url = self.token_url.replace("transaction-pkce-state", state)
+        dyn_token_url = dyn_token_url.replace("tenant-domain", request.args.get('organization_domain') if 'organization_domain' in request.args else self.tenant_domain)
         dyn_token_url = dyn_token_url.replace("client_id", self.client_id)
         dyn_token_url = dyn_token_url.replace("auth-id", request.args["authorization_id"])
         dyn_token_url = dyn_token_url.replace("sign_type", 'sso' if ('sso_gateway' in flask.session and flask.session['sso_gateway']) else 'signin')
@@ -341,6 +345,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
                 dyn_token_url,
                 authorization_response=request.url,
                 client_secret=self.client_secret,
+                verify=False,
                 **tok_url_params,
             )
         except MissingCodeError as e:

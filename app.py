@@ -54,7 +54,8 @@ blueprint = CryptrOAuth2ConsumerBlueprint(
     # base_url="https://samly.howto:4443",
     base_url="http://localhost:4000",
     scope="email profile openid",
-    # authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
+    token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
+    authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
     # authorization_url="https://samly.howto:4443/t/cryptr/",
     # authorization_url_params=dict(code_challenge_method="S256", code_challenge="my-code-challenge", idp_ids=)
     # authorization_url_params=auth_params
@@ -246,6 +247,8 @@ def display_page(pathname):
             session.pop("sso_gateway")
         if "cryptr_oauth_token" in session:
             session.pop("cryptr_oauth_token")
+        if "cryptr_oauth_code_challenge" in session:
+            session.pop("cryptr_oauth_code_challenge")
             logout_user()
             view = logout
         else:
