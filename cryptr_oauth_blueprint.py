@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+from pickle import FALSE
 import re
 
 import flask
@@ -22,6 +23,7 @@ from flask_dance.consumer.requests import OAuth2Session
 log = logging.getLogger(__name__)
 
 
+
 class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
     """
     A subclass of :class:`flask.Blueprint` that sets up OAuth 2 authentication.
@@ -31,6 +33,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         self,
         name,
         import_name,
+        tenant_domain,
         client_id=None,
         client_secret=None,
         *,
@@ -58,6 +61,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         session_class=None,
         storage=None,
         rule_kwargs=None,
+        dedicated_server=False,
+        default_locale='en',
         **kwargs,
     ):
         """
@@ -136,6 +141,9 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             rule_kwargs=rule_kwargs,
         )
 
+        self.tenant_domain = tenant_domain
+        self.default_locale = default_locale
+
         self.base_url = base_url
         self.session_class = session_class or OAuth2Session
 
@@ -148,6 +156,10 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         self.state = state
         self.kwargs = kwargs
         self.client_secret = client_secret
+
+        self.magic_link_auth_url = "{base_url}/t/{tenant_domain}/user_locale/transaction-pkce-state/sign_type/new".format(base_url=self.base_url, tenant_domain=self.tenant_domain)
+
+        self.sso_gateway_auth_url = "{base_url}/".format(base_url=self.base_url) if dedicated_server else "{base_url}/t/{tenant_domain}".format(base_url=self.base_url, tenant_domain=self.tenant_domain)
 
         # used by view functions
         self.authorization_url = authorization_url
@@ -208,9 +220,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
     def build_auth_params(self, **auth_params):
         code_verifier = self.build_code_verifier()
         code_challenge = self.build_code_challenge(code_verifier=code_verifier)
-        print('auth_params', auth_params)
         new_params = dict(code_challenge_method='S256', code_challenge=code_challenge, **auth_params)
-        print('new_params', new_params)
         return (code_verifier, code_challenge, new_params)
 
     def build_code_verifier(self):
@@ -224,48 +234,45 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         code_challenge = code_challenge.replace('=', '')
         return code_challenge
 
+    def base_authorization_url(self):
+        print(flask.session)
+        return self.sso_gateway_auth_url if (('sso_gateway' in flask.session) and flask.session['sso_gateway']) else self.magic_link_auth_url
+
     def login(self):
         log.debug("\n---\nlogin\n---")
-        log.debug("client_id = %s", self.client_id)
         self.session.redirect_uri = url_for(".authorized", _external=True)
         code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
-        print('code_verifier', code_verifier)
+        # print('code_verifier', code_verifier)
+        print(f'\nmagic_link_url: {self.magic_link_auth_url}\n')
+        print(f'\nsso_gateway_auth_url: {self.sso_gateway_auth_url}\n')
         print('code_challenge', code_challenge)
+
+        user_locale = flask.session["locale"] if 'locale' in flask.session else self.default_locale
+
+        print('authorization_url', self.authorization_url)
         url, state = self.session.authorization_url(
-            self.authorization_url, state=self.state, **new_params
+            self.base_authorization_url(), state=self.state, **new_params
         )
         url= url.replace("/transaction-pkce-state/", "/" + state + "/")
+        url= url.replace("/user_locale/", user_locale)
         url= url.replace("state=", "client_state=")
+        print(f'\n{url}\n')
         state_key = f"{self.name}_oauth_state"
         flask.session[state_key] = state
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         flask.session[code_verifier_key] = code_verifier
-        log.debug("state = %s", state)
+        # log.debug("state = %s", state)
         log.debug("redirect URL = %s", url)
         oauth_before_login.send(self, url=url)
         log.debug("\n---\n")
+        if 'sso_gateway' in flask.session and flask.session['sso_gateway']:
+            url += f'&locale={user_locale}'
+            if "idp_ids" in flask.session:
+                for idp_id in flask.session['idp_ids']:
+                    url += f'&idp_ids[]={idp_id}'
+                flask.session.pop("idp_ids")
         return redirect(url)
-    
-    # def enterprise_login(self):
-    #     log.debug("\n---\nlogin\n---")
-    #     log.debug("client_id = %s", self.client_id)
-    #     self.session.redirect_uri = url_for(".authorized", _external=True)
-    #     code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
-    #     print('code_verifier', code_verifier)
-    #     print('code_challenge', code_challenge)
-    #     url, state = self.session.authorization_url(
-    #         self.authorization_url, state=self.state, **new_params
-    #     )
-    #     url= url.replace("state=", "client_state=")
-    #     state_key = f"{self.name}_oauth_state"
-    #     flask.session[state_key] = state
-    #     code_verifier_key = f"{self.name}_oauth_code_verifier"
-    #     flask.session[code_verifier_key] = code_verifier
-    #     log.debug("state = %s", state)
-    #     log.debug("redirect URL = %s", url)
-    #     oauth_before_login.send(self, url=url)
-    #     log.debug("\n---\n")
-    #     return redirect(url)
+
 
     def authorized(self):
         """

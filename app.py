@@ -46,9 +46,12 @@ idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaR
 auth_params = {'idp_ids[]': idp_ids[1]}
 
 blueprint = CryptrOAuth2ConsumerBlueprint(
-    "cryptr", __name__,
+    "cryptr", 
+    __name__,
+    "cryptr",
     client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
     client_secret="my-secret-here",
+    # base_url="https://samly.howto:4443",
     base_url="http://localhost:4000",
     scope="email profile openid",
     token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
@@ -207,6 +210,12 @@ def login_status(url):
 
 # Main router
 
+def cryptr_url(**kwargs):
+    for key, value in kwargs.items():
+        print(f'putting {key} with value {value}')
+        session[key] = value
+    return url_for('cryptr.login')
+
 
 @app.callback(Output('page-content', 'children'), Output('redirect', 'pathname'),
               [Input('url', 'pathname')])
@@ -249,7 +258,7 @@ def display_page(pathname):
             view = page_2_layout
         else:
             view = 'Redirecting to login...'
-            url = url_for("cryptr.login")
+            url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
     else:
         view = index_page
     # You could also return a 404 "URL not found" page here

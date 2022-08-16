@@ -6,3 +6,4 @@ dash-html-components
 Flask
 Flask-Dance
 six
+blinker
