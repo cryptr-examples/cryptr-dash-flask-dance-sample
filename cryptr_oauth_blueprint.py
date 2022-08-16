@@ -164,7 +164,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         # used by view functions
         self.authorization_url = authorization_url
         self.authorization_url_params = authorization_url_params or {}
-        self.token_url = token_url
+        # self.token_url = token_url
+        self.token_url = "http://localhost:4000/api/v1/tenants/cryptr/client_id/transaction-pkce-state/oauth/sign_type/client/auth-id/token"
         self.token_url_params = token_url_params or {}
         self.redirect_url = redirect_url
         self.redirect_to = redirect_to
@@ -254,7 +255,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             self.base_authorization_url(), state=self.state, **new_params
         )
         url= url.replace("/transaction-pkce-state/", "/" + state + "/")
-        url= url.replace("/user_locale/", user_locale)
+        url= url.replace("/user_locale/", "/" + user_locale + "/")
         url= url.replace("state=", "client_state=")
         print(f'\n{url}\n')
         state_key = f"{self.name}_oauth_state"
@@ -262,15 +263,19 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         flask.session[code_verifier_key] = code_verifier
         # log.debug("state = %s", state)
-        log.debug("redirect URL = %s", url)
         oauth_before_login.send(self, url=url)
-        log.debug("\n---\n")
         if 'sso_gateway' in flask.session and flask.session['sso_gateway']:
+            log.debug("should use sso")
             url += f'&locale={user_locale}'
             if "idp_ids" in flask.session:
                 for idp_id in flask.session['idp_ids']:
                     url += f'&idp_ids[]={idp_id}'
                 flask.session.pop("idp_ids")
+        else:
+            log.debug("should use magic link")
+            url = url.replace("/sign_type/", "/" + "signin" + "/")
+        log.debug("redirect URL = %s", url)
+        log.debug("\n---\n")
         return redirect(url)
 
 
@@ -319,10 +324,17 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         self.session.redirect_uri = url_for(".authorized", _external=True)
 
+        for key in request.args:
+            log.debug(f"{key} -> {request.args.get(key)}")
+
         log.debug("client_id = %s", self.client_id)
         log.debug("client_secret = %s", self.client_secret)
         dyn_token_url = self.token_url.replace("transaction-pkce-state", state)
+        dyn_token_url = dyn_token_url.replace("client_id", self.client_id)
         dyn_token_url = dyn_token_url.replace("auth-id", request.args["authorization_id"])
+        dyn_token_url = dyn_token_url.replace("sign_type", 'sso' if ('sso_gateway' in flask.session and flask.session['sso_gateway']) else 'signin')
+
+        print(f"\ndyn_token_url\n{dyn_token_url}\n")
         tok_url_params = dict(code_verifier=code_verifier, nonce="some-nonce", **self.token_url_params)
         try:
             token = self.session.fetch_token(
