@@ -1,3 +1,4 @@
+
 import base64
 import hashlib
 import json
@@ -5,6 +6,7 @@ import logging
 import os
 from pickle import FALSE
 import re
+from uuid import uuid4
 import requests
 
 import flask
@@ -146,6 +148,13 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             rule="/{bp.name}/logout".format(bp=self),
             endpoint="logout",
             view_func=self.logout,
+            **{}
+        )
+        
+        self.add_url_rule(
+            rule="/{bp.name}/refresh".format(bp=self),
+            endpoint="refresh",
+            view_func=self.refresh,
             **{}
         )
 
@@ -300,7 +309,22 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
                 slo_code = revoke_json_resp['slo_code']
                 slo_after_revoke_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/slo-after-revoke-token?slo_code={slo_code}&target_url={request.base_url}'
                 return redirect(slo_after_revoke_url)
-        return redirect('/')
+            else:
+                return redirect('/')
+        else:
+            return redirect('/')
+   
+    def refresh(self):
+        if 'cryptr_oauth_token' in flask.session and 'refresh_token' in flask.session['cryptr_oauth_token']:
+            refresh_token = flask.session['cryptr_oauth_token']['refresh_token']
+            tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
+            refresh_token_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/transaction-pkce-state/oauth/client/token'
+            refreshed_token = self.session.refresh_token(refresh_token_url.replace('transaction-pkce-state', str(uuid4())), refresh_token=refresh_token, verify=False, nonce=str(uuid4()))
+            log.debug("refresh_data \n%s\n", refreshed_token)
+            self.token = refreshed_token
+            return redirect(request.base_url)
+        else:
+            return redirect(request.base_url)
 
 
     def authorized(self):
