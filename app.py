@@ -232,7 +232,7 @@ def display_page(pathname):
         else:
             view = failed
     elif pathname == '/logout':
-        if session["cryptr_oauth_code_verifier"]:
+        if 'cryptr_oauth_code_verifier' in session:
             session.pop("cryptr_oauth_code_verifier")
         if "cryptr_oauth_token" in session:
             session.pop("cryptr_oauth_token")
