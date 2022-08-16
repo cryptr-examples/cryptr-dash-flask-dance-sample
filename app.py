@@ -1,3 +1,4 @@
+from turtle import onclick, width
 import dash
 import os
 import logging
@@ -51,8 +52,8 @@ blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr",
     client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
     client_secret="my-secret-here",
-    # base_url="https://samly.howto:4443",
-    base_url="http://localhost:4000",
+    base_url="https://samly.howto:4443",
+    # base_url="http://localhost:4000",
     scope="email profile openid",
     token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
     authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
@@ -204,7 +205,20 @@ def login_status(url):
     # if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
     if "cryptr_oauth_token" in session \
             and url != '/logout':  # If the URL is /logout, then the user is about to be logged out anyways
-        return dcc.Link('logout', href='/logout'), current_user.get_id()
+        return html.Div([
+            dcc.Link('logout', href='/logout'),
+            dcc.Textarea(
+                id='id_token',
+                value=session['cryptr_oauth_token']['id_token'],
+                style=dict(
+                    width='100%',
+                    height='20rem'
+                ),
+                readOnly='readonly',
+                disabled=True,
+
+            ),
+            ]), session['cryptr_oauth_token']['refresh_token']
     else:
         return dcc.Link('login', href='/login'), 'loggedout'
 
@@ -262,8 +276,8 @@ def display_page(pathname):
             view = page_2_layout
         else:
             view = 'Redirecting to login...'
-            # url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
-            url = cryptr_url(locale='fr')
+            url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
+            # url = cryptr_url(locale='fr')
     else:
         view = index_page
     # You could also return a 404 "URL not found" page here
