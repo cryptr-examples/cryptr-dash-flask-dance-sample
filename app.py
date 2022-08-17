@@ -36,37 +36,25 @@ app = Dash(__name__,
         suppress_callback_exceptions=True,
 )
 
-# cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'DEBUG': True, "CACHE_DEFAULT_TIMEOUT": 300})
-cache = Cache(config={'CACHE_TYPE': 'SimpleCache', "CACHE_DEFAULT_TIMEOUT": 300})
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'DEBUG': True, "CACHE_DEFAULT_TIMEOUT": 300})
 
 cache.init_app(server)
 
 # Updating the Flask Server configuration with Secret Key to encrypt the user session cookie
-server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI='sqlite://///Users/thibaudrenaux/Code/cryptr/python/dash-sample/login.db', SQLALCHEMY_TRACK_MODIFICATIONS=True)
+server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI=os.getenv('SQLALCHEMY_DATABASE_URI'), SQLALCHEMY_TRACK_MODIFICATIONS=True)
 
 
-# code_verifier = generate_token(48)
-# code_challenge = create_s256_code_challenge(code_verifier)
-# # client = OAuth2Session("16dfdba6-d408-494e-b8a3-eb0e8e4f4229", "client_secret", scope="openid email")
-# authorize_url = "https://samly.howto:4443/t/cryptr/?idp_ids%5B%5D=shark_academy_UdVEzZSGHvCsfkMJckqcJn&idp_ids%5B%5D=blockpulse_6Jc3TGatGmsHzexaRP5ZrE"
-idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaRP5ZrE"]
-
-auth_params = {'idp_ids[]': idp_ids[1]}
+idp_ids = os.getenv('CRYPTR_IDP_IDS').split(',') if os.getenv('CRYPTR_IDP_IDS') else []
 
 cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", 
     __name__,
-    "cryptr",
-    client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
-    client_secret="my-secret-here",
-    base_url="https://samly.howto:4443",
-    # base_url="http://localhost:4000",
-    scope="email profile openid",
-    token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
-    authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
-    # authorization_url="https://samly.howto:4443/t/cryptr/",
-    # authorization_url_params=dict(code_challenge_method="S256", code_challenge="my-code-challenge", idp_ids=)
-    # authorization_url_params=auth_params
+    os.getenv('CRYPTR_TENANT_DOMAIN'),
+    client_id=os.getenv('CRYPTR_FRONT_CLIENT_ID'),
+    client_secret=os.getenv('CRYPTR_CLIENT_SECRET'),
+    base_url=os.getenv('CRYPTR_BASE_URL'),
+    scope=os.getenv('CRYPTR_SCOPE'),
+    production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
 
 server.register_blueprint(cryptr_blueprint, url_prefix="/login")
