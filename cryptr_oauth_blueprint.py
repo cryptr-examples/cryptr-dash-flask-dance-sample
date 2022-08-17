@@ -280,8 +280,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         flask.session[state_key] = state
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         flask.session[code_verifier_key] = code_verifier
-        code_challenge_key = f"{self.name}_oauth_code_challenge"
-        flask.session[code_challenge_key] = code_challenge
         # log.debug("state = %s", state)
         oauth_before_login.send(self, url=url)
         if 'sso_gateway' in flask.session and flask.session['sso_gateway']:
@@ -370,7 +368,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             return redirect(url_for(".login"))
 
         code_verifier = flask.session[code_verifier_key]
-        code_challenge_key = f"{self.name}_oauth_code_challenge"
         state = flask.session[state_key]
         log.debug("state = %s", state)
         self.session._state = state
