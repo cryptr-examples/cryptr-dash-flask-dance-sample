@@ -4,15 +4,16 @@ import os
 import logging
 import jwt
 
-from flask import Flask, url_for, session
-from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
-
-from dash import Dash, Input, Output, State, html, dcc
-from flask_dance.consumer import OAuth2ConsumerBlueprint
-import requests
-from flask_ngrok import run_with_ngrok
 
 from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
+from dash import Dash, Input, Output, State, html, dcc
+from flask import Flask, url_for, session
+from flask_caching import Cache
+from flask_dance.consumer import oauth_authorized
+from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
+from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm.exc import NoResultFound
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -35,8 +36,13 @@ app = Dash(__name__,
         suppress_callback_exceptions=True,
 )
 
+# cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'DEBUG': True, "CACHE_DEFAULT_TIMEOUT": 300})
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache', "CACHE_DEFAULT_TIMEOUT": 300})
+
+cache.init_app(server)
+
 # Updating the Flask Server configuration with Secret Key to encrypt the user session cookie
-server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'))
+server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI='sqlite://///Users/thibaudrenaux/Code/cryptr/python/dash-sample/login.db', SQLALCHEMY_TRACK_MODIFICATIONS=True)
 
 
 # code_verifier = generate_token(48)
@@ -47,7 +53,7 @@ idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaR
 
 auth_params = {'idp_ids[]': idp_ids[1]}
 
-blueprint = CryptrOAuth2ConsumerBlueprint(
+cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", 
     __name__,
     "cryptr",
@@ -63,30 +69,48 @@ blueprint = CryptrOAuth2ConsumerBlueprint(
     # authorization_url_params=auth_params
 )
 
-server.register_blueprint(blueprint, url_prefix="/login")
+server.register_blueprint(cryptr_blueprint, url_prefix="/login")
 
+db = SQLAlchemy(server)
 
 # Login manager object will be used to login / logout users
-login_manager = LoginManager()
-login_manager.init_app(server)
-login_manager.login_view = '/login'
+login_manager = LoginManager(server)
 
 # User data model. It has to have at least self.id as a minimum
 
 
-class User(UserMixin):
-    def __init__(self, email):
-        logger.debug('user init %s', email)
-        self.id = email
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(250), unique=True)
 
+class OAuth(OAuthConsumerMixin, db.Model):
+    user_id = db.Column(db.Integer, db.ForeignKey(User.id))
+    user = db.relationship(User)
 
 @login_manager.user_loader
-def load_user(email):
-    ''' This function loads the user by user id. Typically this looks up the user from a user database.
-        We won't be registering or looking up users in this example, since we'll just login using LDAP server.
-        So we'll simply return a User object with the passed in email.
-    '''
-    return User(email)
+def load_user(user_id):
+    logger.debug(f'try to fetch user {user_id}')
+    return User.query.get(int(user_id))
+
+cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_user)
+
+
+@oauth_authorized.connect
+def cryptr_logged_in(blueprint, token):
+    print('\ncryptr_logged_in\n')
+    if blueprint.name == 'cryptr' and 'access_token' in token and 'id_token' in token:
+        id_token = token['id_token']
+        decoded = jwt.decode(id_token, options={'verify_signature': False, 'verify_aud': False})
+        username = decoded['email']
+        query = User.query.filter_by(username=username)
+        try:
+            user = query.one()
+        except NoResultFound:
+            user = User(username=username)
+            db.session.add(user)
+            db.session.commit()
+        
+        login_user(user)
 
 
 # User status management views
@@ -204,28 +228,30 @@ def page_2_radios(value):
 @app.callback(Output('user-status-div', 'children'), Output('login-status', 'data'), [Input('url', 'pathname')])
 def login_status(url):
     ''' callback to display login/logout link in the header '''
-    # if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
-    if "cryptr_oauth_token" in session \
+    # if "cryptr_oauth_token" in session \
+    if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
             and url != '/logout':  # If the URL is /logout, then the user is about to be logged out anyways
         if current_user:
             logger.debug('current_user present')
             logger.debug(current_user.is_authenticated)
             logger.debug('current_user %s', current_user.id)
+        logger.debug('session %s\n', session)
         return html.Div([
-            html.H1(f'Bonjour {current_user.id}'),
+            html.H1(f'Bonjour {current_user.username}'),
             dcc.Link('logout', href='/logout'),
-            dcc.Textarea(
-                id='id_token',
-                value=session['cryptr_oauth_token']['id_token'],
-                style=dict(
-                    width='100%',
-                    height='20rem'
-                ),
-                readOnly='readonly',
-                disabled=True,
+            # dcc.Textarea(
+            #     id='id_token',
+            #     value=session['cryptr_oauth_token']['id_token'],
+            #     style=dict(
+            #         width='100%',
+            #         height='20rem'
+            #     ),
+            #     readOnly='readonly',
+            #     disabled=True,
 
-            ),
-            ]), session['cryptr_oauth_token']['refresh_token']
+            # ),
+            ]), current_user.username
+            #  session['cryptr_oauth_token']['refresh_token']
     else:
         return dcc.Link('login', href='/login'), 'loggedout'
 
@@ -252,46 +278,49 @@ def display_page(pathname):
     view = None
     url = dash.no_update
     # print("session", session)
+    if isinstance(current_user, User):
+        print('should be authorized by cryptr', current_user)
+    else:
+        print('should not be authorized by cryptr')
+    
+    current_user_present = isinstance(current_user, User)
 
     if pathname == '/login':
         view = login
     elif pathname == '/success':
         # if current_user.is_authenticated:
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = success
         else:
             view = failed
     elif pathname == '/logout':
-        if "cryptr_oauth_token" in session:
-            logout_user()
+        if current_user_present:
+            # logout_user()
             view = logout
+            query = OAuth.query.filter_by(user_id=current_user.id)
+            try:
+                oauth = query.one()
+                session['refresh_token'] = oauth.token['refresh_token']
+            except NoResultFound:
+                print('error')
             url = url_for('cryptr.logout')
         else:
             view = login
             url = '/login'
 
     elif pathname == '/page-1':
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = page_1_layout
         else:
             view = 'Redirecting to magic link login...'
-            url = cryptr_url(locale='fr')
+            url = cryptr_url(sso_gateway=False, locale='fr')
     elif pathname == '/page-2':
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = page_2_layout
         else:
             view = 'Redirecting to sso login...'
             url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
     else:
-        if "cryptr_oauth_token" in session:
-            print('\n---\ndecode id token\n---\n')
-            encoded = session['cryptr_oauth_token']['id_token']
-            print('encoded', encoded)
-            decode = jwt.decode(encoded, options={'verify_signature': False, 'verify_aud': False})
-            print('decode', decode)
-            if 'email' in decode:
-                user = User(decode['email'])
-                login_user(user)
         view = index_page
     # You could also return a 404 "URL not found" page here
     return view, url

@@ -9,3 +9,4 @@ six
 blinker
 pyjwt
 flask_caching
+Flask-SQLAlchemy

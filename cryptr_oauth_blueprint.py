@@ -11,6 +11,7 @@ import requests
 
 import flask
 from flask import current_app, redirect, request, url_for
+from flask_login import current_user, UserMixin
 from oauthlib.oauth2 import MissingCodeError
 from werkzeug.utils import cached_property
 from werkzeug.wrappers import Response
@@ -297,8 +298,9 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         return redirect(url)
 
     def logout(self):
-        if 'cryptr_oauth_token' in flask.session:
-            refresh_token = flask.session['cryptr_oauth_token']['refresh_token']
+        if 'refresh_token' in flask.session:
+            print(current_user.id)
+            refresh_token = flask.session['refresh_token']
             tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
             logout_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/revoke'
             revoke_token_resp = requests.post(logout_url, json={'token': refresh_token, 'token_type_hint': 'refresh_token'}, verify=False)
@@ -312,6 +314,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             else:
                 return redirect('/')
         else:
+            print('user mxin')
             return redirect('/')
    
     def refresh(self):
