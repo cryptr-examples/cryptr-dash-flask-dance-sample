@@ -1,3 +1,5 @@
 .env
+.*.env
+!.sample.env
 __pycache__
 login.db
