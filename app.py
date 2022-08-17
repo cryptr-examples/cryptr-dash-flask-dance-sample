@@ -2,16 +2,18 @@ from turtle import onclick, width
 import dash
 import os
 import logging
+import jwt
 
-from flask import Flask, url_for, session
-from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
-
-from dash import Dash, Input, Output, State, html, dcc
-from flask_dance.consumer import OAuth2ConsumerBlueprint
-import requests
-from flask_ngrok import run_with_ngrok
 
 from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
+from dash import Dash, Input, Output, State, html, dcc
+from flask import Flask, url_for, session
+from flask_caching import Cache
+from flask_dance.consumer import oauth_authorized
+from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
+from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm.exc import NoResultFound
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -34,57 +36,69 @@ app = Dash(__name__,
         suppress_callback_exceptions=True,
 )
 
+cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'DEBUG': True, "CACHE_DEFAULT_TIMEOUT": 300})
+
+cache.init_app(server)
+
 # Updating the Flask Server configuration with Secret Key to encrypt the user session cookie
-server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'))
+server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI=os.getenv('SQLALCHEMY_DATABASE_URI'), SQLALCHEMY_TRACK_MODIFICATIONS=True)
 
 
-# code_verifier = generate_token(48)
-# code_challenge = create_s256_code_challenge(code_verifier)
-# # client = OAuth2Session("16dfdba6-d408-494e-b8a3-eb0e8e4f4229", "client_secret", scope="openid email")
-# authorize_url = "https://samly.howto:4443/t/cryptr/?idp_ids%5B%5D=shark_academy_UdVEzZSGHvCsfkMJckqcJn&idp_ids%5B%5D=blockpulse_6Jc3TGatGmsHzexaRP5ZrE"
-idp_ids = ["shark_academy_UdVEzZSGHvCsfkMJckqcJn", "blockpulse_6Jc3TGatGmsHzexaRP5ZrE"]
+idp_ids = os.getenv('CRYPTR_IDP_IDS').split(',') if os.getenv('CRYPTR_IDP_IDS') else []
 
-auth_params = {'idp_ids[]': idp_ids[1]}
-
-blueprint = CryptrOAuth2ConsumerBlueprint(
+cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", 
     __name__,
-    "cryptr",
-    client_id="16dfdba6-d408-494e-b8a3-eb0e8e4f4229",
-    client_secret="my-secret-here",
-    base_url="https://samly.howto:4443",
-    # base_url="http://localhost:4000",
-    scope="email profile openid",
-    token_url="http://localhost:4000/api/v1/tenants/cryptr/16dfdba6-d408-494e-b8a3-eb0e8e4f4229/transaction-pkce-state/oauth/signin/client/auth-id/token",
-    authorization_url="http://localhost:4000/t/cryptr/en/transaction-pkce-state/signin/new",
-    # authorization_url="https://samly.howto:4443/t/cryptr/",
-    # authorization_url_params=dict(code_challenge_method="S256", code_challenge="my-code-challenge", idp_ids=)
-    # authorization_url_params=auth_params
+    os.getenv('CRYPTR_TENANT_DOMAIN'),
+    client_id=os.getenv('CRYPTR_FRONT_CLIENT_ID'),
+    client_secret=os.getenv('CRYPTR_CLIENT_SECRET'),
+    base_url=os.getenv('CRYPTR_BASE_URL'),
+    scope=os.getenv('CRYPTR_SCOPE'),
+    production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
 
-server.register_blueprint(blueprint, url_prefix="/login")
+server.register_blueprint(cryptr_blueprint, url_prefix="/login")
 
+db = SQLAlchemy(server)
 
 # Login manager object will be used to login / logout users
-login_manager = LoginManager()
-login_manager.init_app(server)
-login_manager.login_view = '/login'
+login_manager = LoginManager(server)
 
 # User data model. It has to have at least self.id as a minimum
 
 
-class User(UserMixin):
-    def __init__(self, username):
-        self.id = username
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(250), unique=True)
+
+class OAuth(OAuthConsumerMixin, db.Model):
+    user_id = db.Column(db.Integer, db.ForeignKey(User.id))
+    user = db.relationship(User)
+
+@login_manager.user_loader
+def load_user(user_id):
+    logger.debug(f'try to fetch user {user_id}')
+    return User.query.get(int(user_id))
+
+cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_user)
 
 
-@ login_manager.user_loader
-def load_user(username):
-    ''' This function loads the user by user id. Typically this looks up the user from a user database.
-        We won't be registering or looking up users in this example, since we'll just login using LDAP server.
-        So we'll simply return a User object with the passed in username.
-    '''
-    return User(username)
+@oauth_authorized.connect
+def cryptr_logged_in(blueprint, token):
+    print('\ncryptr_logged_in\n')
+    if blueprint.name == 'cryptr' and 'access_token' in token and 'id_token' in token:
+        id_token = token['id_token']
+        decoded = jwt.decode(id_token, options={'verify_signature': False, 'verify_aud': False})
+        username = decoded['email']
+        query = User.query.filter_by(username=username)
+        try:
+            user = query.one()
+        except NoResultFound:
+            user = User(username=username)
+            db.session.add(user)
+            db.session.commit()
+        
+        login_user(user)
 
 
 # User status management views
@@ -152,9 +166,9 @@ app.layout = html.Div([
 
 
 index_page = html.Div([
-    dcc.Link('Go to Page 1', href='/page-1'),
+    dcc.Link('Go to Page 1 (magic link)', href='/page-1'),
     html.Br(),
-    dcc.Link('Go to Page 2', href='/page-2'),
+    dcc.Link('Go to Page 2 (SSO)', href='/page-2'),
 ])
 
 page_1_layout = html.Div([
@@ -202,23 +216,18 @@ def page_2_radios(value):
 @app.callback(Output('user-status-div', 'children'), Output('login-status', 'data'), [Input('url', 'pathname')])
 def login_status(url):
     ''' callback to display login/logout link in the header '''
-    # if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
-    if "cryptr_oauth_token" in session \
+    # if "cryptr_oauth_token" in session \
+    if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
             and url != '/logout':  # If the URL is /logout, then the user is about to be logged out anyways
+        if current_user:
+            logger.debug('current_user present')
+            logger.debug(current_user.is_authenticated)
+            logger.debug('current_user %s', current_user.id)
+        logger.debug('session %s\n', session)
         return html.Div([
+            html.H1(f'Bonjour {current_user.username}'),
             dcc.Link('logout', href='/logout'),
-            dcc.Textarea(
-                id='id_token',
-                value=session['cryptr_oauth_token']['id_token'],
-                style=dict(
-                    width='100%',
-                    height='20rem'
-                ),
-                readOnly='readonly',
-                disabled=True,
-
-            ),
-            ]), session['cryptr_oauth_token']['refresh_token']
+            ]), current_user.is_authenticated
     else:
         return dcc.Link('login', href='/login'), 'loggedout'
 
@@ -244,33 +253,45 @@ def display_page(pathname):
     # We setup the defaults at the beginning, with redirect to dash.no_update; which simply means, just keep the requested url
     view = None
     url = dash.no_update
-    print("session", session)
+    # print("session", session)
+    if isinstance(current_user, User):
+        print('should be authorized by cryptr', current_user)
+    else:
+        print('should not be authorized by cryptr')
+    
+    current_user_present = isinstance(current_user, User)
 
     if pathname == '/login':
         view = login
     elif pathname == '/success':
         # if current_user.is_authenticated:
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = success
         else:
             view = failed
     elif pathname == '/logout':
-        if "cryptr_oauth_token" in session:
-            logout_user()
+        if current_user_present:
+            # logout_user()
             view = logout
+            query = OAuth.query.filter_by(user_id=current_user.id)
+            try:
+                oauth = query.one()
+                session['refresh_token'] = oauth.token['refresh_token']
+            except NoResultFound:
+                print('error')
             url = url_for('cryptr.logout')
         else:
             view = login
             url = '/login'
 
     elif pathname == '/page-1':
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = page_1_layout
         else:
             view = 'Redirecting to magic link login...'
-            url = cryptr_url(locale='fr')
+            url = cryptr_url(sso_gateway=False, locale='fr')
     elif pathname == '/page-2':
-        if "cryptr_oauth_token" in session:
+        if current_user_present:
             view = page_2_layout
         else:
             view = 'Redirecting to sso login...'

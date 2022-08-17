@@ -4,17 +4,12 @@ import hashlib
 import json
 import logging
 import os
-from pickle import FALSE
 import re
 from uuid import uuid4
 import requests
 
 import flask
 from flask import current_app, redirect, request, url_for
-from oauthlib.oauth2 import MissingCodeError
-from werkzeug.utils import cached_property
-from werkzeug.wrappers import Response
-
 from flask_dance.consumer.base import (
     BaseOAuthConsumerBlueprint,
     oauth_authorized,
@@ -22,6 +17,12 @@ from flask_dance.consumer.base import (
     oauth_error,
 )
 from flask_dance.consumer.requests import OAuth2Session
+from flask_login import current_user
+from oauthlib.oauth2 import MissingCodeError
+from jwt import PyJWKClient
+from werkzeug.utils import cached_property
+from werkzeug.wrappers import Response
+
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         rule_kwargs=None,
         dedicated_server=False,
         default_locale='en',
+        production_mode=True,
         **kwargs,
     ):
         """
@@ -179,13 +181,14 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         self.sso_gateway_auth_url = "{base_url}/".format(base_url=self.base_url) if dedicated_server else "{base_url}/t/{tenant_domain}".format(base_url=self.base_url, tenant_domain=self.tenant_domain)
 
         # used by view functions
-        self.authorization_url = authorization_url
+        self.authorization_url = self.magic_link_auth_url
         self.authorization_url_params = authorization_url_params or {}
-        # self.token_url = token_url
         self.token_url = f"{self.base_url}/api/v1/tenants/tenant-domain/client_id/transaction-pkce-state/oauth/sign_type/client/auth-id/token"
         self.token_url_params = token_url_params or {}
         self.redirect_url = redirect_url
         self.redirect_to = redirect_to
+
+        self.production_mode = production_mode
 
         self.teardown_app_request(self.teardown_session)
 
@@ -278,8 +281,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         flask.session[state_key] = state
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         flask.session[code_verifier_key] = code_verifier
-        code_challenge_key = f"{self.name}_oauth_code_challenge"
-        flask.session[code_challenge_key] = code_challenge
         # log.debug("state = %s", state)
         oauth_before_login.send(self, url=url)
         if 'sso_gateway' in flask.session and flask.session['sso_gateway']:
@@ -297,11 +298,12 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         return redirect(url)
 
     def logout(self):
-        if 'cryptr_oauth_token' in flask.session:
-            refresh_token = flask.session['cryptr_oauth_token']['refresh_token']
+        if 'refresh_token' in flask.session:
+            print(current_user.id)
+            refresh_token = flask.session['refresh_token']
             tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
             logout_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/revoke'
-            revoke_token_resp = requests.post(logout_url, json={'token': refresh_token, 'token_type_hint': 'refresh_token'}, verify=False)
+            revoke_token_resp = requests.post(logout_url, json={'token': refresh_token, 'token_type_hint': 'refresh_token'}, verify=self.production_mode)
             revoke_json_resp = revoke_token_resp.json()
             if 'revoked_at' in revoke_json_resp:
                 flask.session.clear()
@@ -312,6 +314,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             else:
                 return redirect('/')
         else:
+            print('user mxin')
             return redirect('/')
    
     def refresh(self):
@@ -319,7 +322,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             refresh_token = flask.session['cryptr_oauth_token']['refresh_token']
             tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
             refresh_token_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/transaction-pkce-state/oauth/client/token'
-            refreshed_token = self.session.refresh_token(refresh_token_url.replace('transaction-pkce-state', str(uuid4())), refresh_token=refresh_token, verify=False, nonce=str(uuid4()))
+            refreshed_token = self.session.refresh_token(refresh_token_url.replace('transaction-pkce-state', str(uuid4())), refresh_token=refresh_token, verify=self.production_mode, nonce=str(uuid4()))
             log.debug("refresh_data \n%s\n", refreshed_token)
             self.token = refreshed_token
             return redirect(request.base_url)
@@ -366,8 +369,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             return redirect(url_for(".login"))
 
         code_verifier = flask.session[code_verifier_key]
-        code_challenge_key = f"{self.name}_oauth_code_challenge"
-        code_challenge = flask.session[code_challenge_key]
         state = flask.session[state_key]
         log.debug("state = %s", state)
         self.session._state = state
@@ -375,10 +376,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         self.session.redirect_uri = url_for(".authorized", _external=True)
 
-        # for key in request.args:
-        #     log.debug(f"{key} -> {request.args.get(key)}")
-
-        # dyn_token_url = self.token_url.replace("transaction-pkce-state", code_challenge if 'organization_domain' in request.args else state)
         dyn_token_url = self.token_url.replace("transaction-pkce-state", state)
         dyn_token_url = dyn_token_url.replace("tenant-domain", request.args.get('organization_domain') if 'organization_domain' in request.args else self.tenant_domain)
         dyn_token_url = dyn_token_url.replace("client_id", self.client_id)
@@ -392,7 +389,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
                 dyn_token_url,
                 authorization_response=request.url,
                 client_secret=self.client_secret,
-                verify=False,
+                verify=self.production_mode,
                 **tok_url_params,
             )
         except MissingCodeError as e:
@@ -414,6 +411,10 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         if set_token:
             try:
+                print('\nset token\n')
+                for key in ['locale', 'cryptr_oauth_code_challenge', 'cryptr_oauth_code_verifier', 'locale', 'sso_gateway']:
+                    if key in flask.session:
+                        flask.session.pop(key)
                 self.token = token
             except ValueError as error:
                 log.warning("OAuth 2 authorization error: %s", str(error))
