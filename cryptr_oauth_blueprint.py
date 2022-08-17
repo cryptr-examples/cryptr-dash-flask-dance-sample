@@ -10,11 +10,6 @@ import requests
 
 import flask
 from flask import current_app, redirect, request, url_for
-from flask_login import current_user
-from oauthlib.oauth2 import MissingCodeError
-from werkzeug.utils import cached_property
-from werkzeug.wrappers import Response
-
 from flask_dance.consumer.base import (
     BaseOAuthConsumerBlueprint,
     oauth_authorized,
@@ -22,6 +17,12 @@ from flask_dance.consumer.base import (
     oauth_error,
 )
 from flask_dance.consumer.requests import OAuth2Session
+from flask_login import current_user
+from oauthlib.oauth2 import MissingCodeError
+from jwt import PyJWKClient
+from werkzeug.utils import cached_property
+from werkzeug.wrappers import Response
+
 
 log = logging.getLogger(__name__)
 
