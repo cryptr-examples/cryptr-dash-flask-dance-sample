@@ -7,3 +7,5 @@ Flask
 Flask-Dance
 six
 blinker
+pyjwt
+flask_caching

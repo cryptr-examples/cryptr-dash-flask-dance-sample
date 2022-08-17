@@ -2,6 +2,7 @@ from turtle import onclick, width
 import dash
 import os
 import logging
+import jwt
 
 from flask import Flask, url_for, session
 from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
@@ -74,17 +75,18 @@ login_manager.login_view = '/login'
 
 
 class User(UserMixin):
-    def __init__(self, username):
-        self.id = username
+    def __init__(self, email):
+        logger.debug('user init %s', email)
+        self.id = email
 
 
-@ login_manager.user_loader
-def load_user(username):
+@login_manager.user_loader
+def load_user(email):
     ''' This function loads the user by user id. Typically this looks up the user from a user database.
         We won't be registering or looking up users in this example, since we'll just login using LDAP server.
-        So we'll simply return a User object with the passed in username.
+        So we'll simply return a User object with the passed in email.
     '''
-    return User(username)
+    return User(email)
 
 
 # User status management views
@@ -152,9 +154,9 @@ app.layout = html.Div([
 
 
 index_page = html.Div([
-    dcc.Link('Go to Page 1', href='/page-1'),
+    dcc.Link('Go to Page 1 (magic link)', href='/page-1'),
     html.Br(),
-    dcc.Link('Go to Page 2', href='/page-2'),
+    dcc.Link('Go to Page 2 (SSO)', href='/page-2'),
 ])
 
 page_1_layout = html.Div([
@@ -205,7 +207,12 @@ def login_status(url):
     # if hasattr(current_user, 'is_authenticated') and current_user.is_authenticated \
     if "cryptr_oauth_token" in session \
             and url != '/logout':  # If the URL is /logout, then the user is about to be logged out anyways
+        if current_user:
+            logger.debug('current_user present')
+            logger.debug(current_user.is_authenticated)
+            logger.debug('current_user %s', current_user.id)
         return html.Div([
+            html.H1(f'Bonjour {current_user.id}'),
             dcc.Link('logout', href='/logout'),
             dcc.Textarea(
                 id='id_token',
@@ -244,7 +251,7 @@ def display_page(pathname):
     # We setup the defaults at the beginning, with redirect to dash.no_update; which simply means, just keep the requested url
     view = None
     url = dash.no_update
-    print("session", session)
+    # print("session", session)
 
     if pathname == '/login':
         view = login
@@ -276,6 +283,15 @@ def display_page(pathname):
             view = 'Redirecting to sso login...'
             url = cryptr_url(sso_gateway=True, idp_ids=idp_ids, locale='fr')
     else:
+        if "cryptr_oauth_token" in session:
+            print('\n---\ndecode id token\n---\n')
+            encoded = session['cryptr_oauth_token']['id_token']
+            print('encoded', encoded)
+            decode = jwt.decode(encoded, options={'verify_signature': False, 'verify_aud': False})
+            print('decode', decode)
+            if 'email' in decode:
+                user = User(decode['email'])
+                login_user(user)
         view = index_page
     # You could also return a 404 "URL not found" page here
     return view, url
