@@ -227,19 +227,7 @@ def login_status(url):
         return html.Div([
             html.H1(f'Bonjour {current_user.username}'),
             dcc.Link('logout', href='/logout'),
-            # dcc.Textarea(
-            #     id='id_token',
-            #     value=session['cryptr_oauth_token']['id_token'],
-            #     style=dict(
-            #         width='100%',
-            #         height='20rem'
-            #     ),
-            #     readOnly='readonly',
-            #     disabled=True,
-
-            # ),
-            ]), current_user.username
-            #  session['cryptr_oauth_token']['refresh_token']
+            ]), current_user.is_authenticated
     else:
         return dcc.Link('login', href='/login'), 'loggedout'
 

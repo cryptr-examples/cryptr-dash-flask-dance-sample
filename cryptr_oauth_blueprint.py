@@ -413,6 +413,10 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         if set_token:
             try:
+                print('\nset token\n')
+                for key in ['locale', 'cryptr_oauth_code_challenge', 'cryptr_oauth_code_verifier', 'locale', 'sso_gateway']:
+                    if key in flask.session:
+                        flask.session.pop(key)
                 self.token = token
             except ValueError as error:
                 log.warning("OAuth 2 authorization error: %s", str(error))
