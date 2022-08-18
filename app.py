@@ -1,19 +1,20 @@
-from turtle import onclick, width
-import dash
-import os
 import logging
+import os
+
+import dash
 import jwt
-
-
-from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
-from dash import Dash, Input, Output, State, html, dcc
-from flask import Flask, url_for, session
+from dash import Dash, Input, Output, State, dcc, html
+from flask import Flask, session, url_for
 from flask_caching import Cache
 from flask_dance.consumer import oauth_authorized
-from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
-from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
+from flask_dance.consumer.storage.sqla import (OAuthConsumerMixin,
+                                               SQLAlchemyStorage)
+from flask_login import (LoginManager, UserMixin, current_user, login_user,
+                         logout_user)
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm.exc import NoResultFound
+
+from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -53,7 +54,9 @@ cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     client_id=os.getenv('CRYPTR_FRONT_CLIENT_ID'),
     client_secret=os.getenv('CRYPTR_CLIENT_SECRET'),
     base_url=os.getenv('CRYPTR_BASE_URL'),
+    jwks_base_url=os.getenv('CRYPTR_JWKS_BASE_URL'),
     scope=os.getenv('CRYPTR_SCOPE'),
+    audience=os.getenv('CRYPTR_AUDIENCE'),
     production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
 
