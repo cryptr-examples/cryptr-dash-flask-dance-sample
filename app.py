@@ -19,7 +19,7 @@ from cryptr import make_cryptr_blueprint, cryptr
 
 logging.basicConfig()
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
 # CREDIT: This code is copied from Dash official documentation:
 # https://dash.plotly.com/urls
@@ -70,7 +70,8 @@ cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
 
 logger.debug('cryptr_blueprint %s', str(cryptr_blueprint))
 
-server.register_blueprint(cryptr_blueprint, url_prefix="/login")
+server.register_blueprint(bp, url_prefix="/login")
+# server.register_blueprint(cryptr_blueprint, url_prefix="/login")
 
 db = SQLAlchemy(server)
 
@@ -93,7 +94,8 @@ def load_user(user_id):
     logger.debug(f'try to fetch user {user_id}')
     return User.query.get(int(user_id))
 
-cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_user)
+# cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_user)
+bp.storage = SQLAlchemyStorage(OAuth, db.session, user=current_user)
 
 
 @oauth_authorized.connect
