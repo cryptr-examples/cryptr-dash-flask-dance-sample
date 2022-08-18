@@ -88,7 +88,7 @@ cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_use
 
 @oauth_authorized.connect
 def cryptr_logged_in(blueprint, token):
-    print('\ncryptr_logged_in\n')
+    logger.debug('cryptr: %s', 'logged_in')
     if blueprint.name == 'cryptr' and 'access_token' in token and 'id_token' in token:
         id_token = token['id_token']
         decoded = jwt.decode(id_token, options={'verify_signature': False, 'verify_aud': False})
@@ -238,7 +238,6 @@ def login_status(url):
 
 def cryptr_url(**kwargs):
     for key, value in kwargs.items():
-        print(f'putting {key} with value {value}')
         session[key] = value
     return url_for('cryptr.login')
 
@@ -256,11 +255,10 @@ def display_page(pathname):
     # We setup the defaults at the beginning, with redirect to dash.no_update; which simply means, just keep the requested url
     view = None
     url = dash.no_update
-    # print("session", session)
     if isinstance(current_user, User):
-        print('should be authorized by cryptr', current_user)
+        logger.debug('cryptr: should be authorized: %s', current_user)
     else:
-        print('should not be authorized by cryptr')
+        logger.debug('cryptr: should not be authorized')
     
     current_user_present = isinstance(current_user, User)
 
@@ -280,8 +278,8 @@ def display_page(pathname):
             try:
                 oauth = query.one()
                 session['refresh_token'] = oauth.token['refresh_token']
-            except NoResultFound:
-                print('error')
+            except NoResultFound as not_found_error:
+                logger.warning("Cryptr Oauth error: %s", str(not_found_error))
             url = url_for('cryptr.logout')
         else:
             view = login
