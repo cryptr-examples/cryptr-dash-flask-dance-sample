@@ -15,6 +15,7 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm.exc import NoResultFound
 
 from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
+from cryptr import make_cryptr_blueprint, cryptr
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -47,6 +48,12 @@ server.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), SQLALCHEMY_DATABASE_URI
 
 idp_ids = os.getenv('CRYPTR_IDP_IDS').split(',') if os.getenv('CRYPTR_IDP_IDS') else []
 
+bp = make_cryptr_blueprint(audience=os.getenv('CRYPTR_AUDIENCE'),tenant_domain=os.getenv('CRYPTR_TENANT_DOMAIN'), base_url=os.getenv('CRYPTR_BASE_URL'))
+logger.debug('bp %s', str(bp))
+logger.debug('bp %s', bp.authorization_url)
+logger.debug('bp %s', bp.magic_link_auth_url)
+logger.debug('bp %s', bp.sso_gateway_auth_url)
+
 cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     "cryptr", 
     __name__,
@@ -60,6 +67,8 @@ cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     dedicated_server=os.getenv('CRYPTR_DEDICATED_SERVER', 'false') == 'true',
     production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
+
+logger.debug('cryptr_blueprint %s', str(cryptr_blueprint))
 
 server.register_blueprint(cryptr_blueprint, url_prefix="/login")
 
