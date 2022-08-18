@@ -57,7 +57,7 @@ cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     jwks_base_url=os.getenv('CRYPTR_JWKS_BASE_URL'),
     scope=os.getenv('CRYPTR_SCOPE'),
     audience=os.getenv('CRYPTR_AUDIENCE'),
-    dedicated_server=os.getenv('CRYPTR_DEDICATED_SERVER', 'false') == true,
+    dedicated_server=os.getenv('CRYPTR_DEDICATED_SERVER', 'false') == 'true',
     production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
 
