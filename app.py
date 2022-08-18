@@ -1,19 +1,20 @@
-from turtle import onclick, width
-import dash
-import os
 import logging
+import os
+
+import dash
 import jwt
-
-
-from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
-from dash import Dash, Input, Output, State, html, dcc
-from flask import Flask, url_for, session
+from dash import Dash, Input, Output, State, dcc, html
+from flask import Flask, session, url_for
 from flask_caching import Cache
 from flask_dance.consumer import oauth_authorized
-from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
-from flask_login import login_user, LoginManager, UserMixin, logout_user, current_user
+from flask_dance.consumer.storage.sqla import (OAuthConsumerMixin,
+                                               SQLAlchemyStorage)
+from flask_login import (LoginManager, UserMixin, current_user, login_user,
+                         logout_user)
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm.exc import NoResultFound
+
+from cryptr_oauth_blueprint import CryptrOAuth2ConsumerBlueprint
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -53,7 +54,10 @@ cryptr_blueprint = CryptrOAuth2ConsumerBlueprint(
     client_id=os.getenv('CRYPTR_FRONT_CLIENT_ID'),
     client_secret=os.getenv('CRYPTR_CLIENT_SECRET'),
     base_url=os.getenv('CRYPTR_BASE_URL'),
+    jwks_base_url=os.getenv('CRYPTR_JWKS_BASE_URL'),
     scope=os.getenv('CRYPTR_SCOPE'),
+    audience=os.getenv('CRYPTR_AUDIENCE'),
+    dedicated_server=os.getenv('CRYPTR_DEDICATED_SERVER', 'false') == 'true',
     production_mode=(os.getenv('CRYPTR_PRODUCTION_MODE') == 'true' if os.getenv('CRYPTR_PRODUCTION_MODE') else True)
 )
 
@@ -85,7 +89,7 @@ cryptr_blueprint.storage = SQLAlchemyStorage(OAuth, db.session, user=current_use
 
 @oauth_authorized.connect
 def cryptr_logged_in(blueprint, token):
-    print('\ncryptr_logged_in\n')
+    logger.debug('cryptr: %s', 'logged_in')
     if blueprint.name == 'cryptr' and 'access_token' in token and 'id_token' in token:
         id_token = token['id_token']
         decoded = jwt.decode(id_token, options={'verify_signature': False, 'verify_aud': False})
@@ -235,7 +239,6 @@ def login_status(url):
 
 def cryptr_url(**kwargs):
     for key, value in kwargs.items():
-        print(f'putting {key} with value {value}')
         session[key] = value
     return url_for('cryptr.login')
 
@@ -253,11 +256,10 @@ def display_page(pathname):
     # We setup the defaults at the beginning, with redirect to dash.no_update; which simply means, just keep the requested url
     view = None
     url = dash.no_update
-    # print("session", session)
     if isinstance(current_user, User):
-        print('should be authorized by cryptr', current_user)
+        logger.debug('cryptr: should be authorized: %s', current_user)
     else:
-        print('should not be authorized by cryptr')
+        logger.debug('cryptr: should not be authorized')
     
     current_user_present = isinstance(current_user, User)
 
@@ -277,8 +279,8 @@ def display_page(pathname):
             try:
                 oauth = query.one()
                 session['refresh_token'] = oauth.token['refresh_token']
-            except NoResultFound:
-                print('error')
+            except NoResultFound as not_found_error:
+                logger.warning("Cryptr Oauth error: %s", str(not_found_error))
             url = url_for('cryptr.logout')
         else:
             view = login

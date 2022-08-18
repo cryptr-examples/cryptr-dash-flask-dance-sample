@@ -6,23 +6,20 @@ import logging
 import os
 import re
 from uuid import uuid4
-import requests
 
 import flask
+import jwt
+import requests
 from flask import current_app, redirect, request, url_for
-from flask_dance.consumer.base import (
-    BaseOAuthConsumerBlueprint,
-    oauth_authorized,
-    oauth_before_login,
-    oauth_error,
-)
+from flask_dance.consumer.base import (BaseOAuthConsumerBlueprint,
+                                       oauth_authorized, oauth_before_login,
+                                       oauth_error)
 from flask_dance.consumer.requests import OAuth2Session
 from flask_login import current_user
-from oauthlib.oauth2 import MissingCodeError
 from jwt import PyJWKClient
+from oauthlib.oauth2 import MissingCodeError
 from werkzeug.utils import cached_property
 from werkzeug.wrappers import Response
-
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +35,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         name,
         import_name,
         tenant_domain,
+        audience,
         client_id=None,
         client_secret=None,
         *,
@@ -68,6 +66,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         dedicated_server=False,
         default_locale='en',
         production_mode=True,
+        jwks_base_url=None,
         **kwargs,
     ):
         """
@@ -162,8 +161,10 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         self.tenant_domain = tenant_domain
         self.default_locale = default_locale
+        self.audience = audience
 
         self.base_url = base_url
+        self.jwks_base_url = jwks_base_url or self.base_url
         self.session_class = session_class or OAuth2Session
 
         # passed to OAuth2Session()
@@ -256,27 +257,47 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         return code_challenge
 
     def base_authorization_url(self):
-        print(flask.session)
         return self.sso_gateway_auth_url if (('sso_gateway' in flask.session) and flask.session['sso_gateway']) else self.magic_link_auth_url
+
+    def jwks_url(self, token_domain):
+        return f'{self.jwks_base_url}/t/{token_domain}/.well-known/jwks'
+
+    def issuer(self, token_domain):
+        return f'{self.base_url}/t/{token_domain}'
+
+
+    def verification_attributes(self, token_domain):
+        issuer = self.issuer(token_domain=token_domain)
+        required_claims = ['tnt', 'cid', 'ips', 'sci', 'dbs', 'email', 'jtt', 'scp', 'sub', 'ver']
+        return dict(algorithms=['RS256'], issuer=issuer, audience=self.audience, options={'require': required_claims})
+
+    def verify_token(self, token):
+        decoded = jwt.decode(token, options={'verify_aud': False, 'verify_signature': False})
+        token_domain = decoded['tnt']
+        
+        jwks_url = self.jwks_url(token_domain=token_domain)
+        jwks_client = PyJWKClient(jwks_url)
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+
+        return jwt.decode(token, signing_key.key, **self.verification_attributes(token_domain=token_domain))
+
 
     def login(self):
         log.debug("\n---\nlogin\n---")
         self.session.redirect_uri = url_for(".authorized", _external=True)
         code_verifier, code_challenge, new_params = self.build_auth_params(**self.authorization_url_params)
-        # print('code_verifier', code_verifier)
-        print('code_verifier', code_verifier)
-        print('code_challenge', code_challenge)
+        log.debug('Cryptr: code_verifier=%s', code_verifier)
+        log.debug('Cryptr: code_challenge=%s', code_challenge)
 
         user_locale = flask.session["locale"] if 'locale' in flask.session else self.default_locale
 
-        print('authorization_url', self.authorization_url)
+        log.debug('Cryptr: authorization_url=%s', self.authorization_url)
         url, state = self.session.authorization_url(
             self.base_authorization_url(), state=self.state, **new_params
         )
         url= url.replace("/transaction-pkce-state/", "/" + state + "/")
         url= url.replace("/user_locale/", "/" + user_locale + "/")
         url= url.replace("state=", "client_state=")
-        print(f'\n{url}\n')
         state_key = f"{self.name}_oauth_state"
         flask.session[state_key] = state
         code_verifier_key = f"{self.name}_oauth_code_verifier"
@@ -299,7 +320,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
     def logout(self):
         if 'refresh_token' in flask.session:
-            print(current_user.id)
             refresh_token = flask.session['refresh_token']
             tenant_domain = refresh_token.split('.')[0] if '.' in refresh_token else self.tenant_domain
             logout_url = f'{self.base_url}/api/v1/tenants/{tenant_domain}/{self.client_id}/oauth/token/revoke'
@@ -314,7 +334,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             else:
                 return redirect('/')
         else:
-            print('user mxin')
+            log.warning('Cryptr: No access token found while logging out')
             return redirect('/')
    
     def refresh(self):
@@ -329,7 +349,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         else:
             return redirect(request.base_url)
 
-
     def authorized(self):
         """
         This is the route/function that the user will be redirected to by
@@ -342,7 +361,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             next_url = url_for(self.redirect_to)
         else:
             next_url = "/"
-        log.debug("next_url = %s", next_url)
 
         # check for error in request args
         error = request.args.get("error")
@@ -360,7 +378,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             )
             return redirect(next_url)
 
-        log.debug(flask.session)
         state_key = f"{self.name}_oauth_state"
         code_verifier_key = f"{self.name}_oauth_code_verifier"
         if state_key not in flask.session:
@@ -370,7 +387,6 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         code_verifier = flask.session[code_verifier_key]
         state = flask.session[state_key]
-        log.debug("state = %s", state)
         self.session._state = state
         del flask.session[state_key]
 
@@ -382,7 +398,7 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
         dyn_token_url = dyn_token_url.replace("auth-id", request.args["authorization_id"])
         dyn_token_url = dyn_token_url.replace("sign_type", 'sso' if ('sso_gateway' in flask.session and flask.session['sso_gateway']) else 'signin')
 
-        print(f"\ndyn_token_url\n{dyn_token_url}\n")
+        log.debug("Cryptr: dyn_token_url=%s", dyn_token_url)
         tok_url_params = dict(code_verifier=code_verifier, nonce="some-nonce", **self.token_url_params)
         try:
             token = self.session.fetch_token(
@@ -401,6 +417,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
             )
             raise
 
+        
+
         results = oauth_authorized.send(self, token=token) or []
         set_token = True
         for func, ret in results:
@@ -411,7 +429,8 @@ class CryptrOAuth2ConsumerBlueprint(BaseOAuthConsumerBlueprint):
 
         if set_token:
             try:
-                print('\nset token\n')
+                verified_claims = self.verify_token(token['access_token'])
+                log.debug('verify_claims %s', verified_claims)
                 for key in ['locale', 'cryptr_oauth_code_challenge', 'cryptr_oauth_code_verifier', 'locale', 'sso_gateway']:
                     if key in flask.session:
                         flask.session.pop(key)
